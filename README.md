@@ -1,14 +1,16 @@
-## AI Agent Architecture
+## Hexagonal AI Agent Architecture
 
-This document outlines the architecture, module responsibilities, and core design principles for this project, following Clean Code, modularity, and TDD practices.
+This document outlines the project's architecture using a formal Hexagonal (Ports & Adapters) model. This structure strictly separates business logic (the "Core") from technical implementations (the "Infrastructure").
 
-## Design Principles
+## Core Principles
 
-- Modularity (Clean Code): Each module has a single, well-defined responsibility. For example, FileSystemService only handles file I/O, while HistoryService only handles the business logic for the conversation history.
-- TDD (Test Driven Development): The FileSystemService module is developed using TDD. It is generic, has no knowledge of business logic, and is fully testable.
-- Configuration Separation: Secrets (API keys) are stored securely in .env. Public configuration (active model, provider names) is stored in the /config directory.
-- Simple Lifecycle: Only one conversation is "active" at any time. This conversation is loaded into memory on startup and saved back to disk at the end of the session.
-- Automatic Archiving: If the active conversation file is older than 4 days, it is automatically archived (moved), and a new, empty conversation is started. Archives are read-only ("consultable") and are not modified by the agent.
+1. **Hexagonal Core**: The /src/core/ directory contains all pure business logic. It has zero dependencies on external libraries like fs, winston, or @google/generative-ai. It only knows about "Ports" (interfaces).
+
+2. **Ports** (The Contracts): The /src/core/ports/ directory defines the "contracts" or interfaces that the Core needs to interact with the outside world.
+
+3. **Adapters** (The Infrastructure): The /src/infrastructure/ directory contains the concrete implementations (adapters) for those ports. This is where all the technical code (fs, fetch, APIs) lives.
+
+4. **TDD** (Test Driven Development): The FileSystemAdapter.js (in /infrastructure/) is your TDD module. Because the Core depends on an interface (FileSystemPort.js), it is easy to "mock" this adapter in tests for the HistoryService.
 
 ## File Structure and Module Roles
 
@@ -17,52 +19,59 @@ This document outlines the architecture, module responsibilities, and core desig
 |
 |-- .env                 # (Untracked) Secrets (e.g., GEMINI_API_KEY)
 |-- .gitignore           # Ignores .env, node_modules/, /agent_logs, /conversation_archives
-|-- package.json         # Dependencies (e.g., @google/generative-ai, winston, DOMPurify)
+|-- package.json         # Dependencies (e.g., @google/generative-ai, winston)
 |
-|-- /config/
-|   |-- agent_config.json  # Defines the *active* provider (e.g., { "provider": "gemini" })
-|   |-- provider_settings.json # Public config for *all* providers (model name, API key's env var)
+|-- /config/             # (Unchanged) Public configuration.
+|   |-- agent_config.json
+|   |-- provider_settings.json
 |
 |-- /src/
 |   |
-|   |-- index.js           # ENTRY POINT: Initializes the agent and passes it the user's prompt.
-|   |
-|   |-- Agent.js           # ORCHESTRATOR (Main Logic):
-|   |                      # 1. Initializes all services (log, config, sanitizer, provider, history).
-|   |                      # 2. Calls `historyService.loadHistory()` on startup.
-|   |                      # 3. Holds the active conversation history in memory.
-|   |                      # 4. Cleans the user prompt: `cleanPrompt = sanitizerService.clean(prompt)`.
-|   |                      # 5. Calls `provider.generateResponse(cleanPrompt, history)`.
-|   |                      # 6. Calls `historyService.saveHistory(newHistory)` on shutdown.
-|   |
-|   |-- /providers/        # AI MODULE (Handles AI API logic)
-|   |   |-- ProviderInterface.js # The "contract" or base class that all providers must implement.
-|   |   |-- GeminiProvider.js  # Concrete implementation for the Gemini API.
-|   |   |-- ProviderFactory.js # Factory that reads /config/agent_config.json and returns the correct provider instance.
-|   |
-|   |-- /services/         # TECHNICAL MODULES (Tools)
-|   |   |-- LoggingService.js  # (Your file) Manages logs. Ideally, this uses a plugin like **Winston** to handle log file rotation.
+|   |-- /core/domain/      # === THE HEXAGON (Business Logic) ===
+|   |   |-- Agent.js         # The main orchestrator.
+|   |   |                  # Depends *only* on Port interfaces (e.g., `ProviderPort`, `HistoryService`).
+|   |   |                  # Responsible for safely handling tool execution requests from the Provider (to prevent Prompt Injection attacks).
 |   |   |
-|   |   |-- FileSystemService.js # (YOUR TDD MODULE)
-|   |   |                    # Knows *only* files. 100% generic.
-|   |   |                    # Functions: `read(path)`, `write(path, content)`, `stat(path)` (for date), `archive(path, newPath)` (to move/rename).
+|   |   |-- HistoryService.js# Pure business logic for the lifecycle (4-day rule, archiving).
+|   |   |                  # Depends *only* on `FileSystemPort` and `LoggingPort`.
+|   |
+|   |-- /core/ports/       # === THE PORTS (Interfaces / Contracts) ===
+|   |   |-- FileSystemPort.js  # Contract: `read(path)`, `write(path, content)`, `stat(path)`, `archive(path)`.
+|   |   |-- LoggingPort.js     # Contract: `info(message)`, `warn(message)`, `error(message)`.
+|   |   |-- ProviderPort.js    # Contract: `generateResponse(prompt, history)`.
+|   |   |-- SanitizerPort.js   # Contract: `clean(text)`.
+|   |
+|   |-- /infrastructure/   # === THE OUTSIDE WORLD (Technical Code) ===
+|   |   |-- /adapters/       # Concrete implementations of the Ports.
+|   |   |   |-- FileSystemAdapter.js # (YOUR TDD MODULE) Implements `FileSystemPort`.
+|   |   |   |                  # *This is where you use `fs/promises`.*
+|   |   |   |
+|   |   |   |-- WinstonLoggingAdapter.js # Implements `LoggingPort`. Uses the `winston` library.
+|   |   |   |
+|   |   |   |-- GeminiProviderAdapter.js # Implements `ProviderPort`. Uses `@google/generative-ai`.
+|   |   |   |
+|   |   |   |-- SimpleSanitizerAdapter.js # Implements `SanitizerPort`. Uses regex to block potential OS command injection keywords (e.g., 'rm', 'curl', '>') from terminal input.
 |   |   |
-|   |   |-- HistoryService.js  # BUSINESS LOGIC MODULE (History Lifecycle)
-|   |   |                    # The only module that knows about `active_conversation.json` and `/conversation_archives`.
-|   |   |                    # USES FileSystemService.
-|   |   |                    # `loadHistory()`: Checks date (via `FileSystemService.stat`). If > 4 days, calls `FileSystemService.archive()` and returns `[]`. Else, calls `FileSystemService.read()`.
-|   |   |                    # `saveHistory(history)`: Calls `FileSystemService.write('active_conversation.json', ...)`.
-|   |   |
-|   |   |-- SanitizerService.js # SECURITY MODULE
-|   |   |                    # Cleans user input to prevent injection attacks (e.g., strips <script> tags).
-|   |   |                    # Often uses a library like **DOMPurify**.
+|   |   |-- ProviderFactory.js # Reads /config/ and returns the correct *Provider Adapter*.
+|   |
+|   |-- /application/      # === THE STARTUP LAYER ===
+|   |   |-- index.js         # ENTRY POINT.
+|   |   |                  # This is the *only* place where Core and Infrastructure meet.
+|   |   |                  # It "wires" the application together (Dependency Injection).
+|   |                      # 1. Creates adapter instances (new FileSystemAdapter()).
+|   |                      # 2. Creates core instances (new HistoryService(fileSystemAdapter)).
+|   |                      # 3. Creates the agent (new Agent(historyService, ...)).
+|   |                      # 4. Starts the agent.
 |
-|-- /agent_logs/           # (Untracked) Generated log files (e.g., agent.log).
+|-- /agent_logs/           # (Untracked) Generated log files.
 |
-|-- /conversation_archives/ # (Untracked) Old conversations (> 4 days) are moved here.
+|-- /conversation_archives/ # (Untracked) Old conversations (> 4 days).
 |
 |-- /tests/
-|   |-- FileSystemService.test.js # Your TDD tests for the FileSystemService.
-|   |-- HistoryService.test.js # Tests for the expiration logic (by "mocking" FileSystemService).
-|   |-- SanitizerService.test.js # Tests to ensure inputs are cleaned correctly.
+|   |-- /infrastructure/
+|   |   |-- FileSystemAdapter.test.js # (Your TDD tests).
+|   |   |-- SimpleSanitizerAdapter.test.js # Tests for the input sanitizer.
+|   |
+|   |-- /core/
+|   |   |-- HistoryService.test.js # Tests the 4-day logic (mocks the FileSystemPort).
 ```
