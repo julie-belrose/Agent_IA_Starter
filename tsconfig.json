@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",                // Target modern JavaScript
+    "module": "NodeNext",             // Use Node.js modern module system
+    "moduleResolution": "NodeNext",   // How TS finds modules
+    "strict": true,                   // Enable all strict checks
+    "esModuleInterop": true,          // Improves compatibility between modules
+    "skipLibCheck": true,             // Skip checking .d.ts files
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "./dist",               // Where compiled JavaScript will be placed
+    "rootDir": "./src",               // Where our source code is
+    "baseUrl": ".",                    // Allows root-relative imports
+    "paths": {
+      "#infrastructure/*": [
+        "src/infrastructure/*"
+      ],
+      "#adapters/*": [
+        "src/infrastructure/adapters/*"
+      ],
+      "#ports/*": [
+        "src/core/ports/*"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*", // Include all source code
+    "tests/**/*" // Include tests
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
