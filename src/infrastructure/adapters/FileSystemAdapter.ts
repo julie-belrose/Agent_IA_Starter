@@ -1,4 +1,7 @@
+import {writeFile} from "fs/promises";
+
 export class FileSystemAdapter {
-    async write(TEST_PATH: string, TEST_CONTENT: string) {
-    }
+    async write(path: string, content: string) {
+        await writeFile(path, content);
+    };
 }

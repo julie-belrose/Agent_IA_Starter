@@ -32,6 +32,8 @@ describe('FileSystemAdapter (write)', () => {
         expect(mockWriteFile).toHaveBeenCalledTimes(1);
         expect(mockWriteFile).toHaveBeenCalledWith(TEST_PATH, TEST_CONTENT);
     });
+
+
 });
 
 
